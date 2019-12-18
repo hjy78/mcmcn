@@ -2,8 +2,11 @@ Package: mcmcn
 Type: Package
 Title: Markov Chain Monte Carlo Sampler
 Version: 0.5.0
-Author@R: person("Jiayi", "Huang", , email = "hjy0708@mail.ustc.edu.cn",
-                 role = c("aut", "cre"))
+Author@R: c(
+            person("Jiayi", "Huang", , email = "hjy0708@mail.ustc.edu.cn",
+                  role = c("aut", "cre")),
+            person("Yuecheng", "Zhang", , email = "an1999@mail.ustc.edu.cn",
+                  role = c("aut"))
 Description: Simulates continuous distributions of random vectors using
     Markov chain Monte Carlo (MCMC). Users specify the distribution by
     an R function that evaluates the unnormalized density. Algorithms are random
@@ -18,3 +21,7 @@ LazyData: true
 RoxygenNote: 6.1.1
 URL: http://github.com/hjy78/mcmcn
 BugReports: http://github.com/hjy78/mcmcn/issues
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr

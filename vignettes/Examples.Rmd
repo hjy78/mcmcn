@@ -1,0 +1,894 @@
+---
+title: "Examples"
+author: "Zhang Yuecheng"
+output: rmarkdown::pdf_document
+vignette: >
+  %\VignetteIndexEntry{Examples}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+Sys.setenv(LANGUAGE = "en")
+library(mcmcn)
+library(mcmc)
+```
+
+# 1 The Problem
+
+This is an example of using the $mcmcn$ package in R.  
+
+Simulated data for the problem are in the dataset $logit$.There are five variables in the data set, the response $y$ and four predictors, $x1$, $x2$, $x3$, and $x4$.A frequentist analysis for the problem is done by the following R statements
+
+```{r,echo=FALSE}
+data(logit)
+out <- glm(y ~ x1 + x2 + x3 + x4, data = logit,
+    family = binomial, x = TRUE)
+summary(out)
+```
+
+But this problem isn't about that frequentist analysis, we want a Bayesian analysis.  For our Bayesian analysis we assume the same data model as the frequentist, and we assume the prior distribution of the five parameters makes them independent and identically normally distributed with mean 0 and standard deviation 2.
+
+The log unnormalized posterior density (log likelihood plus log prior)for this model is calculated by the following R function. 
+
+```{r}
+lupost_factory <- function(x, y) function(beta) {
+    eta <- as.numeric(x %*% beta)
+    logp <- ifelse(eta < 0, eta - log1p(exp(eta)), - log1p(exp(- eta)))
+    logq <- ifelse(eta < 0, - log1p(exp(eta)), - eta - log1p(exp(- eta)))
+    logl <- sum(logp[y == 1]) + sum(logq[y == 0])
+    return(exp(logl - sum(beta^2) / 8))
+}
+
+lupost <- lupost_factory(out$x, out$y)
+```
+
+The tricky calculation of the log likelihood avoids overflow and catastrophic cancellation in calculation of $\log(p)$ and $\log(q)$ where so taking logs gives.
+$$
+   p  = \frac{\exp(\eta)}{1 + \exp(\eta)} = \frac{1}{1 + \exp(- \eta)}
+   \\
+   q  = \frac{1}{1 + \exp(\eta)} = \frac{\exp(- \eta)}{1 + \exp(- \eta)}
+$$
+$$
+   \log(p)  = \eta - \log(1 + \exp(\eta)) = - \log(1 + \exp(- \eta))
+   \\
+   \log(q)  = - \log(1 + \exp(\eta)) = - \eta - \log(1 + \exp(- \eta))
+$$
+
+To avoid overflow, we always chose the case where the argument of $\exp$ is negative.  We have also avoided catastrophic cancellation when $\lvert\eta\rvert$ is large.  If $\eta$ is large and positive, then
+
+$$
+   p  \approx 1
+   \\
+   q  \approx 0
+   \\
+   \log(p)  \approx - \exp(- \eta)
+   \\
+   \log(q)  \approx - \eta - \exp(- \eta)
+$$
+
+and our use of the R function log1p, which calculates the function $x \mapsto \log(1 + x)$ correctly for small $x$ avoids all problems.  The case where $\eta$ is large and negative is similar.
+
+# 2 Beginning MCMCN
+
+With those definitions, the following code runs the Metropolis algorithm to simulate the posterior.
+
+```{r}
+set.seed(42)    # to get reproducible results
+beta.init <- as.numeric(coefficients(out))
+
+out <- metrop(lupost,beta.init,1e3)
+
+out1<-mtrp(lupost,1e3,beta.init)
+names(out1)
+out1$alpha
+```
+
+The arguments to the $mtrp$ function used here are
+
+-  an R function (here $lupost$) that evaluates the log unnormalized density of the desired stationary distribution of the Markov chain (posterior distribution).  Note that the unnormalized density may be zero, in which case the log unnormalized density is $-Inf$.
+-  an initial state (here $beta.init$) of the Markov chain.
+-  a number of batches (here $1e3$) for the Markov chain.This combines with batch length and spacing (both 1 by default)to determine the number of iterations done.
+-  additional arguments (here $x$ and $y$) supplied to provided functions (here $lupost$).
+-  there is also ``burn`` argument, and burn-in is easily accomplished.
+
+The output is in the component $out\$chain$ returned by the $mtrp$ function.  We'll look at it presently, but first we need to adjust the proposal to get a higher acceptance rate ($out\$alpha$).  It is generally accepted that an acceptance rate of about 20% is right, although this recommendation is based on the asymptotic analysis of a toy problem(simulating a multivariate normal distribution) for which one would never use MCMC and is very unrepresentative of difficult MCMCN applications.
+
+We came to a similar conclusion,that a 20% acceptance rate is about right, in a very different situation.But they also warned that a 20% acceptance rate could be very wrong and produced an example where a 20% acceptance rate was impossible and attempting to reduce the acceptance rate below 70% would keep the sampler from ever visiting part of the state space.  So the 20% magic number must be considered like other rules of thumb we teach in intro courses(like $n > 30$ means means normal approximation is valid).
+
+```{r}
+out1<-mtrp(lupost,1000,out1$chain[1000,],stepsize = 0.3)
+out1$alpha
+```
+
+Here the first argument to each instance of the $metrop$ function is the output of a previous invocation.  The Markov chain continues where the previous run stopped, doing just what it would have done if it had kept going, the initial state and random seed being the final state and final random seed of the previous invocation.  Everything stays the same except for the arguments supplied (here $scale$).
+
+-  The argument $scale$ controls the size of the Metropolis``normal random walk`` proposal.  The default is $scale = 1$.Big steps give lower acceptance rates.  Small steps give higher.We want something about 20%.  It is also possible to make $scale$ a vector or a matrix.  See $help(mtrp)$.
+
+# 3 Diagnostics
+
+That does it for the acceptance rate.  So let's do a longer run and look at the results.
+```{r}
+out1 <- mtrp(lupost,10000,out1$chain[1000,],stepsize = 0.3)
+t.test(out1$acpt)$conf.int
+```
+
+Here we do a Monte Carlo confidence interval for the true unknown acceptance ratebwhat we would see with an infinite Monte Carlo sample size.
+
+```{r}
+plot(ts(out1$chain))
+```
+
+Another way to look at the output is an autocorrelation plot.Figure shows the time series plot made by the R statement
+```{}
+library(stats)
+acf(out1$chain)
+```
+
+The purpose of regression diagnostics is to find obvious, gross,embarrassing problems that jump out of simple plots .
+
+The time series plots will show obvious nonstationarity.They will not show nonobvious nonstationarity.  They provide no guarantee whatsoever that your Markov chain is sampling anything remotely resembling the correct stationary distribution(with log unnormalized density $lupost$).  In this very easy problem, we do not expect any convergence difficulties and so believe what the diagnostics seem to show, but one is a fool to trust such diagnostics in difficult problems.
+
+The autocorrelation plots seem to show that the autocorrelations are negligible after about lag 25.This diagnostic inference is reliable if the sampler is actually working and worthless otherwise.Thus batches of length 25 should be sufficient, but let's use length 100 to be safe.
+
+# 4 Monte Carlo Estimates and Standard Errors
+
+```{r}
+out1 <- mtrp(lupost,100,out1$chain[100,],stepsize = 0.3)
+outfun <- function(z) cbind(z, z^2)
+out.chain<-outfun(out1$chain)
+t.test(out.chain)$conf.int
+```
+
+ We need to use the identity to write variance as a function of two things that can be estimated by simple averages.Hence we want to average the state itself andthe squares of each component.  Hence our $outfun$ returns $c(z, z^2)$ for an argument (the state vector) $z$.
+ 
+$$
+   var(X) = E(X^2) - E(X)^2
+$$
+
+
+## Simple Means
+
+The means of batch means are
+```{r}
+apply(out.chain, 2, mean)
+```
+
+The first 5 numbers are the Monte Carlo estimates of the posterior means. The second 5 numbers are the Monte Carlo estimates of the posterior ordinary second moments.  We get the posterior variances by
+```{r}
+foo <- apply(out.chain, 2, mean)
+mu <- foo[1:5]
+sigmasq <- foo[6:10] - mu^2
+mu
+sigmasq
+```
+
+Monte Carlo standard errors (MCSE) are calculated from the batch means.This is simplest for the means.
+```{r}
+mu.mcse <- apply(out.chain[ , 1:5], 2, sd) / sqrt(out$nbatch)
+mu.mcse
+```
+
+The extra factor $sqrt(out\$nbatch)$ arises because the batch means have variance $\sigma^2 / b$ where $b$ is the batch length, which is$out\$blen$,whereas the overall means $mu$ have variance $\sigma^2 / n$ where $n$ is the total number of iterations, which is $out$blen * out$nbatch$.
+
+## Functions of Means
+
+To get the MCSE for the posterior variances we apply the delta method.Let $u_i$ denote the sequence of batch means of the first kind for one parameter and $\bar{u}$ the grand mean (the estimate of the posterior mean of that parameter),let $v_i$ denote the sequence of batch means of the second kind for the same parameter and $\bar{v}$ the grand mean (the estimate of the posterior second absolute moment of that parameter), and let $\mu = E(\bar{u})$ and $\nu = E(\bar{v})$.  Then the delta method linearizes the nonlinear function
+$$
+   g(\mu, \nu) = \nu - \mu^2
+$$
+
+$$
+   \Delta g(\mu, \nu) = \Delta \nu - 2 \mu \Delta \mu
+$$
+
+$$
+   g(\bar{u}, \bar{v}) - g(\mu, \nu)
+$$
+
+the same asymptotic normal distribution 
+$$
+   (\bar{v} - \nu) - 2 \mu (\bar{u} - \mu)
+$$
+
+ variance of $1 / nbatch$ 
+$$
+   (v_i - \nu) - 2 \mu (u_i - \mu)
+$$
+
+this variance is estimated by
+$$
+   \frac{1}{n_{\text{batch}}} \sum_{i = 1}^{n_{\text{batch}}}
+   \bigl[ (v_i - \bar{v}) - 2 \bar{u} (u_i - \bar{u}) \bigr]^2
+$$
+
+```{r}
+u <- out.chain[ , 1:5]
+v <- out.chain[ , 6:10]
+ubar <- apply(u, 2, mean)
+vbar <- apply(v, 2, mean)
+deltau <- sweep(u, 2, ubar)
+deltav <- sweep(v, 2, vbar)
+foo <- sweep(deltau, 2, ubar, "*")
+sigmasq.mcse <- sqrt(apply((deltav - 2 * foo)^2, 2, mean) / out$nbatch)
+sigmasq.mcse
+```
+
+Does the MCSE for the posterior variance.
+
+```{r}
+sqrt(mean(((v[ , 2] - vbar[2]) - 2 * ubar[2] * (u[ , 2] - ubar[2]))^2) /
+   100)
+```
+
+## Functions of Functions of Means
+
+If we are also interested in the posterior standard deviation,the delta method gives its standard error in terms of that for the variance.
+```{r}
+sigma <- sqrt(sigmasq)
+sigma.mcse <- sigmasq.mcse / (2 * sigma)
+sigma
+sigma.mcse
+```
+
+# 5 A Final Run
+
+So that's it.  The only thing left to do is a little more precision(use a long enough run of your Markov chain sampler so that the MCSE are less than 0.01)
+```{r}
+out1 <- mtrp(lupost,500,out1$chain[100,],stepsize = 0.3,burn = 400)
+t.test(out1$chain)$conf.int
+out$time
+```
+
+There are some nicer output, which is presented in three tables constructed from the R variables defined above using the R $xtable$ command in the $xtable$ library.
+
+$\mu$
+```{r}
+foo <- rbind(mu, mu.mcse)
+dimnames(foo) <- list(c("estimate", "MCSE"),
+    c("constant", paste("$x_", 1:4, "$", sep = "")))
+library(xtable)
+print(xtable(foo, digits = rep(4, 6),
+    align = c("l", rep("c", 5))), floating = FALSE,
+    caption.placement = "top",
+    sanitize.colnames.function = function(x) return(x))
+```
+
+$\sigma_{sq}$
+```{r}
+foo <- rbind(sigmasq, sigmasq.mcse)
+dimnames(foo) <- list(c("estimate", "MCSE"),
+    c("constant", paste("$x_", 1:4, "$", sep = "")))
+library(xtable)
+print(xtable(foo, digits = rep(4, 6),
+    align = c("l", rep("c", 5))), floating = FALSE,
+    caption.placement = "top",
+    sanitize.colnames.function = function(x) return(x))
+```
+
+$\sigma$
+```{r}
+foo <- rbind(sigma, sigma.mcse)
+dimnames(foo) <- list(c("estimate", "MCSE"),
+    c("constant", paste("$x_", 1:4, "$", sep = "")))
+library(xtable)
+print(xtable(foo, digits = rep(4, 6),
+    align = c("l", rep("c", 5))), floating = FALSE,
+    caption.placement = "top",
+    sanitize.colnames.function = function(x) return(x))
+```
+
+
+# 6 New Variance Estimation Functions
+
+R function initseq estimates variances in the Markov chain central limit theorem (CLT) following the methodology. These methods only apply to scalar-valued functionals of reversible Markov chains, but the Markov chains produced by the ``mtrp`` function satisfy this condition, even, as we shall see below, when batching is used.
+
+Rather than redo the Markov chains in the preceding material, we just look at a toy problem, a time series, which can be simulated in one line of R.  This is the example on the help page for initseq.
+```{r}
+n <- 2e4
+rho <- 0.99
+x <- arima.sim(model = list(ar = rho), n = n)
+```
+
+The time series x is a reversible Markov chain and trivially a scalar-valued functional of a Markov chain.
+
+Define:
+$$
+   \gamma_k = cov(X_i, X_{i + k})
+$$
+
+where the covariances refer to the stationary Markov chain having the same transition probabilities as ``x``.  
+
+Then the variance in the CLT is:
+$$
+   \sigma^2 = \gamma_0 + 2 \sum_{k = 1}^\infty \gamma_k
+$$
+
+$$
+   \bar{x}_n \approx \text{Normal}\left(\mu, \frac{\sigma^2}{n}\right),
+$$
+where $\mu = E(X_i)$ is the quantity being estimated by MCMC (in this toy problem $\mu = 0$).
+
+Naive estimates of $\sigma^2$ obtained by plugging in empirical estimates of the gammas do not provide consistent estimation.
+
+Define:
+$$
+   \Gamma_k = \gamma_{2 k} + \gamma_{2 k + 1}
+$$
+
+We says that $\Gamma_k$ considered as a function of $k$ is strictly positive, strictly decreasing, and strictly convex.Thus it makes sense to use estimators that use these properties.
+
+```{r}
+out <- initseq(x)
+plot(seq(along = out$Gamma.pos) - 1, out$Gamma.pos,
+        xlab = "k", ylab = expression(Gamma[k]), type = "l")
+lines(seq(along = out$Gamma.dec) - 1, out$Gamma.dec, lty = "dotted")
+lines(seq(along = out$Gamma.con) - 1, out$Gamma.con, lty = "dashed")
+```
+
+Plot ``Big Gamma`` defined aboved.
+
+Solid line, initial positive sequence estimator.
+
+Dotted line, initial monotone sequence estimator.
+
+Dashed line, initial convex sequence estimator.
+
+The ``initseq`` function makes the computation trivial, it makes sense to use the initial convex sequence.What is actually important is the estimate of $\sigma^2$, which is given by
+```{r}
+out$var.con
+(1 + rho) / (1 - rho) * 1 / (1 - rho^2)
+```
+
+For comparison, we have given the exact theoretical value of $\sigma^2$.
+
+These initial sequence estimators seem, at first sight to be a competitor for the method of batch means.  However,the two methods are complementary.  The sequence of batch means is itself a scalar-valued functional of a reversible Markov chain.  Hence the initial sequence estimators can be applied to it.
+```{r}
+blen <- 5
+x.batch <- apply(matrix(x, nrow = blen), 2, mean)
+bout <- initseq(x.batch)
+```
+
+Because the batch length is too short, the variance of the batch means does not estimate $\sigma^2$.  We must account for the autocorrelation of the batches, shown in Figure .
+```{r}
+plot(seq(along = bout$Gamma.con) - 1, bout$Gamma.con,
+        xlab = "k", ylab = expression(Gamma[k]), type = "l")
+```
+
+Because the the variance is proportional to one over the batch length,
+we need to multiply by the batch length to estimate the $\sigma^2$
+for the original series.
+```{r}
+out$var.con
+bout$var.con * blen
+```
+
+Another way to look at this is that the MCMC estimator of $\mu$ is either ${mean(x)}$ or ${mean(x.batch)}$.  And the variance must be divided by the sample size to give standard errors.
+```{r}
+mean(x) + c(-1, 1) * qnorm(0.975) * sqrt(out$var.con / length(x))
+mean(x.batch) + c(-1, 1) * qnorm(0.975) * sqrt(bout$var.con / length(x.batch))
+```
+
+# 7 Dot-dot-dot Versus Global Variables Versus Closures
+
+This deals with three ways to pass information to a function being passed to another R function (a higher-order function), for example when
+
+-  the function being passed is the objective function for an optimization
+    done by the higher-order function, which optimizes
+    (R function {optim} for example),
+-  the function being passed is the integrand for an integration
+    done by the higher-order function, which integrates
+    (R function {integrate} for example),
+-  the function being passed is the estimator of a parameter for a
+    bootstrap done by the higher-order function, which simulates
+    the (bootstrap approximation) of the sampling distribution of the
+    estimator (R function {boot} in R package {boot},
+    for example),
+-  the function being passed is the log unnormalized density function
+    for a simulation
+    done by the higher-order function, which simulates the distribution
+    having that unnormalized density
+    (R function {metrop} in this package for example),
+
+These ways are
+
+-  using dot-dot-dot (R syntax $...$),
+-  using global variables,
+-  using closures, also called the function factory pattern.
+
+This explains them all and the virtues and vices of each.
+
+##  Dot-dot-dot
+
+The dot-dot-dot mechanism is fairly easy to use when only one function is passed to the higher-order function, but does require care and more work to use.It is even harder to deal with when more than one function is passed to the higher-order function.  R functions $mtrp$ in this package can be passed functions: the log unnormalized density function and the output function.
+
+### Only One Function Argument
+
+The log unnormalized density function was defined by:
+```{r}
+lupost1<- function(beta, x, y) {
+     eta <- as.numeric(x %*% beta)
+     logp <- ifelse(eta < 0, eta - log1p(exp(eta)), - log1p(exp(- eta)))
+     logq <- ifelse(eta < 0, - log1p(exp(eta)), - eta - log1p(exp(- eta)))
+     logl <- sum(logp[y == 1]) + sum(logq[y == 0])
+     return((logl - sum(beta^2) / 8))
+}
+
+```
+
+Then we have to execute the function factory $lupost_factory$ to make the lupost function.
+
+But the main difference is that R function $lupost$:
+
+-  here has 3 arguments, beta, x,and y, and the latter two must be passed via the dot-dot-dot mechanism, but
+-  there has 1 argument, beta, and it just knows about x and y --- they are in its closure.
+
+So to use this lupost function, we have to add arguments x and y to each call to R function metrop.
+```{r}
+out <- glm(y ~ x1 + x2 + x3 + x4, data = logit,
+    family = binomial, x = TRUE)
+x <- out$x
+y <- out$y
+out<-metrop(lupost1,beta.init,1e3,scale=0.3,x=x,y=y)
+```
+
+```{r}
+out1<-mtrp(lupost,1e3,beta.init,stepsize = 0.1)
+out1$alpha
+out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
+out1$alpha
+```
+
+### More Than One Function Argument
+
+The situation becomes more complicated when more than one function argument is passed to the higher-order function.Then they all must handle the same dot-dot-dot arguments whether or not they want them.So now we must define the output function as:
+```{r}
+outfun <- function(z, ...) c(z, z^2)
+```
+
+The ``...`` argument in the function signature is essential because this function is going to be passed dot-dot-dot arguments ${x}$ and ${y}$, which it does not need and does not want, so it has to allow for them.
+
+```{r}
+out <- metrop(out,nbatch = 100,blen = 100,outfun = outfun,x=x,y=y)
+out$accept
+```
+
+## Global Variables
+
+In this method we define both functions passed to the higher-order function without $...$ and without using a function factory.  We already in the preceding section of this appendix defined R objects {x} and {y} as global variables .
+```{r}
+lupost <- function(beta) {
+     eta <- as.numeric(x %*% beta)
+     logp <- ifelse(eta < 0, eta - log1p(exp(eta)), - log1p(exp(- eta)))
+     logq <- ifelse(eta < 0, - log1p(exp(eta)), - eta - log1p(exp(- eta)))
+     logl <- sum(logp[y == 1]) + sum(logq[y == 0])
+     return(exp(logl - sum(beta^2) / 8))
+}
+outfun <- function(z) cbind(z, z^2)
+```
+
+```{r}
+out1 <- mtrp(lupost,1e3,beta.init,stepsize = 0.3)
+out1$alpha
+out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
+out1$alpha
+out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
+out1$alpha
+out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
+out1$alpha
+out1 <- mtrp(lupost,100,beta.init,stepsize = 0.3)
+out1$alpha
+out.chain<-outfun(out1$chain)
+```
+
+But if we change the name of the global variables to say modmat and resp instead of x and y,then our code breaks.  R function lupost is looking up global variables x and y under those names not under any other names. 
+
+## Function Factory
+
+The terminology ``function factory pattern`` is apparently .  But it is just a special case about how closures work (in R and all other languages that have them).Compare:
+```{r}
+fred <- function(y) function(x) x + y
+fred(2)(3)
+```
+
+to
+```{r}
+lupost_factory <- function(x, y) function(beta) {
+    eta <- as.numeric(x %*% beta)
+    logp <- ifelse(eta < 0, eta - log1p(exp(eta)), - log1p(exp(- eta)))
+    logq <- ifelse(eta < 0, - log1p(exp(eta)), - eta - log1p(exp(- eta)))
+    logl <- sum(logp[y == 1]) + sum(logq[y == 0])
+    return(logl - sum(beta^2) / 8)
+}
+lupost <- lupost_factory(x, y)
+lupost(beta.init)
+```
+
+We could also do the same calculation treating $lupost_factory$
+as just an ordinary curried function, like R function {fred}
+in the preceding example,
+```{r}
+lupost_factory(x, y)(beta.init)
+```
+
+# 8 Metropolis algorithm
+
+## Overview
+
+This is an example how to use morphometric Markov chains as implemented in the @mcmcn@ package in R.
+
+
+Let $X$ be an $\mathbb{R}^k$ valued random variable with probability density function, $f_X$.  Let $g$ be a diffeomorphism, and $Y=g(X)$.  Then the probability density function of $Y$, $f_Y$ is given by
+$$
+  f_Y(y) = f_X\bigl(g^{-1}(y)\bigr) \det\bigl( \nabla g^{-1}(y) \bigr).
+$$
+Since $g$ is a diffeomorphism, we can draw inference about $X$ from information about $Y$ (and vice versa).It is not unusual for $f_X$ to either be known only up to a normalizing constant, or to be analytically intractable in other ways --- such as being high dimensional.
+
+A common solution to this problem is to use Markov chain Monte Carlo (MCMC) methods to learn about $f_X$. When using MCMC, a primary concern of the practitioner should be the question``Does the Markov chain converge fast enough to be useful?``  One very useful convergence rate is called geometrically ergodic.
+
+The mcmc package implements the Metropolis random-walk algorithm for arbitrary log unnormalized probability densities.  But the Metropolis random-walk algorithm does not always perform well.  As is demonstrated in johnson-geyer, for $f_X$ and $f_Y$ related by diffeomorphism, a Metropolis random-walk for $f_Y$ can be geometrically ergodic even though a Metropolis random-walk for $f_X$ is not.Since the transformation is one-to-one, inference about $f_X$ can be drawn from the Markov chain for $f_Y$.
+
+The morph.metrop and morph functions in the mcmcn package provide this functionality, and this vignette gives a demonstration on how to use them.
+
+## T Distribution
+
+We start with a univariate example, which is a Student $t$ distribution with three degrees of freedom.Of course, one doesn't need MCMC to simulate this distribution,but it does illustrate some aspects of using variable transformation.
+
+A necessary condition for geometric ergodicity of a random-walk Metropolis algorithm is that the target density $\pi$ have a moment generating function. For a univariate target density, which we have in this section, a sufficient condition for geometric ergodicity of a random-walk Metropolis algorithm is that the target density $\pi$ be rexply light.Thus if we do not use variable transformation,the Markov chain simulated by the ``mtrp`` function will not be geometrically ergodic.It shows that a $t$ distribution is sub-rexply light.  Hence using the transformations described in their Corollaries~1 and~2 will induce a target density $\pi_\gamma$ for which a Metropolis random-walk will be geometrically ergodic.using the transformation described as $h_2$ will induce a target density for which a Metropolis random-walk will be geometrically ergodic.
+
+Passing a positive value for b to morph function will create the aforementioned transformation, $h_2$. 
+```{r}
+library(mcmc)
+library(mcmcn)
+h2 <- morph(b=1)
+```
+
+We can now see the induced density.  Note that morph works for log unnormalized densities, so we need exponentiate the induced density to plot it on the usual scale.
+```{r}
+lud <- function(x) dt(x, df=3, log=TRUE)
+ll<-function (lud) 
+{
+    force(lud)
+    function(state, ...) {
+        foo <- lud(out$inverse(state), ...)
+        if (length(foo) != 1) 
+            stop("log unnormalized density function returned vector not scalar")
+        if (is.na(foo)) 
+            stop("log unnormalized density function returned NA or NaN")
+        if (foo == -Inf) 
+            return(foo)
+        if (!is.finite(foo)) 
+            stop("log unnormalized density function returned +Inf")
+        foo + out$log.jacobian(state)
+    }
+}
+lud.induced1 <- ll(lud)
+
+lud.induced <- h2$lud(lud)
+```
+
+We can plot the two densities,
+```{r}
+curve(exp(Vectorize(lud.induced)(x)), from = -3, to = 3, lty = 2,
+    xlab = "t", ylab = "density")
+curve(exp(lud(x)), add = TRUE)
+legend("topright", c("t density", "induced density"), lty=1:2)
+```
+
+The Vectorize in this example is necessary because the function lud.induced is not vectorized.Instead, it treats any vector passed as a single input, which is rescaled and passed to lud.  Compare the behavior of lud and lud.induced in the following example.
+```{r}
+lud(1:4)
+lud(1)
+foo <- try(lud.induced(1:4))
+class(foo)
+cat(foo, "\n")
+lud.induced(1)
+```
+
+Because the function dt is vectorized, the function lud is also vectorized, mapping vectors to vectors,whereas the function lud.induced is not vectorized, mapping vectors to scalars.
+
+Before we start using random numbers, we set the seed of the random number generator so this document always produces the same results.
+```{r}
+set.seed(42)
+```
+
+Running a Markov chain for the induced density is done with morph.metrop.
+```{r}
+lud1 <- function(x) {
+  a=dt(x, df=3, log=TRUE)
+  return(exp(a))
+  }
+out <- mtrp(lud1, 100,0,stepsize = 1)
+```
+
+```{r}
+out$alpha
+```
+
+An acceptance rate of 60% to fix emacs highlighting is probably too high.  By increasing the scale of the proposal distribution we can bring it down towards 20%.
+```{r}
+out <- mtrp(lud1, 100,0,stepsize = 4)
+out$alpha
+```
+
+We now use this Markov chain to estimate the expectation of the target distribution.Makes the autocorrelation plot .
+```{r}
+acf(out$chain)
+```
+
+It looks like there is no significant autocorrelation among the batches so the following produces a valid confidence interval for the true unknown mean of the target distribution 
+```{r}
+t.test(out$chain)
+```
+
+If a shorter confidence interval is desired, the Markov chain can be run longer (increase either the number of batches or the batch length, or both).Note that when calculating our estimate and the Monte Carlo standard error we are not concerned with what was happening on the transformed scale.  The morph.metrop function seamlessly does this for us.
+
+### Unmorphed
+
+To show the utility of the transformation, we will study the behavior of the Markov chain with and without the transformation for the same problem as in the preceding section.We will consider two different estimation methods.
+
+- Estimate the mean of the target distribution using a random-walk Metropolis algorithm implemented by the metrop function. jarner-roberts demonstrate that a central limit theorem does not hold for these estimates.
+- Estimate the mean of the target distribution using a random-walk Metropolis algorithm implemented by the morph.metrop function with argument morph = morph(b=1). johnson-geyer demonstrate that a central limit theorem does hold for these estimates.
+
+
+For the former, we need to adjust the scale.
+```{r}
+out.unmorph <- mtrp(lud1, 1000,out$chain[100])
+out.unmorph$alpha
+out.unmorph <-mtrp(lud1, 1000,out$chain[100],stepsize = 4)
+out.unmorph$alpha
+out.unmorph <- mtrp(lud1, 1000,out$chain[100],stepsize = 6)
+out.unmorph$alpha
+```
+
+```{r}
+lout <- suppressWarnings(try(load("morph1.rda"), silent = TRUE))
+if (inherits(lout, "try-error")) {
+    out.unmorph <- mtrp(lud1, 1e3,out.unmorph[1000],stepsize = 1)
+    save(out.unmorph, file = "morph1.rda")
+} else {
+    .Random.seed <- out.unmorph$final.seed
+}
+out.unmorph$alpha
+```
+
+Let's look at the distribution of batch means.
+```{r}
+foo <- as.vector(out.unmorph$batch)
+qqnorm(foo)
+qqline(foo)
+```
+
+The following code makes a Q-Q plot of the batch means.We see bad behavior of the unmorphed chain. These batch means(or at least some batch means for sufficiently long batch length) should look normally distributed, and these don't.We do a formal test just to check our interpretation of the plot
+```{r}
+shapiro.test(foo)
+```
+
+
+## Binomial Distribution with a Conjugate Prior
+
+We demonstrate a morphometric Markov chain using the UCBAdmisions data set included in R, (use help(UCBAdmissions) to see details of this data set).  We will model the probability of a student being admitted or rejected, using the sex of the student and the department that the student applied to as predictor variables.  For our prior, we naively assume that 30% of all students are admitted, independent of sex or department.  As this is a naive prior, we will only add 5 students to each gender-department combination.  This will not give the prior much weight, most of the information in the posterior distribution will be from the data.
+
+If we have $L$ observations from a multinomial distribution, then using a multinomial logit-link, with model matrices $M^1,\dots,M^L$, regression parameter $\beta$, observed counts $Y^1,\dots,Y^N$ with observed sample sizes $N^1,\dots,N^L$ and prior probabilities $\xi^1, \dots, \xi^L$ and prior ``sample sizes`` $\nu^1,\dots,\nu^L$ then the posterior distribution of $\beta$ is given by above.
+$$
+\pi(\beta|y,n,\xi,\nu) \propto \exp\biggl\{ \sum_{l=1}^L ({y^l + \xi^l
+    \nu^l, M^l \beta}) - (n^l + \nu^l) \log\bigl(
+    \sum_j e^{M_{j\cdot} \beta} \bigr) \biggr\}
+$$
+where $\in{a, b}$ denotes the usual inner product between vectors $a$ and $b$.  For our application, we can simplify this in two ways.
+
+First, we use the posterior counts instead of the sum of the prior and data counts, i.e. use $y^{*l} = y^l + \xi^l \nu^l$ and $n^{*l} = n^l + \nu^l$.
+
+Second, to avoid having a direction of recession in $\pi(\beta|\cdot)$, we need to fix the elements of $\beta$ that correspond with one of the response categories.  Since we are going to fitting a binomial response, if we set these elements of $\beta$ to be $0$, we may then replace the sequence of model matrices with a single model matrix; $M$ instead of $M^1,\dots,M^L$.  The $l$-th row of $M$ will correspond to $M^l$.  Label the two response categories $A$ and $B$.  Without loss of generality, we will fix the elements of $\beta$ corresponding to category $B$ to 0.
+
+Let $x_1,\dots,x_L$ represent the posterior counts of category $A$, and $\beta^*$ represent the corresponding elements of $\beta$ --- these are the elements of $\beta$ we did not fix as 0.  The meaning of $n^{*1},\dots,n^{*L}$ is unchanged.  Then our simplified unnormalized posterior density is
+$$
+  \pi(\beta|x,n^*) \propto
+  \exp\biggl\{
+    ({x, M \beta^*}
+    -
+    \sum_{l=1}^L n^{*l}) \log\bigl(1 + e^{(M \beta^*)_l}\bigr)
+  \biggr\}.
+$$
+
+```{r}
+lud.binom <- function(beta, M, x, n) {
+  MB <- M %*% beta
+  sum(x * MB) - sum(n * log(1 + exp(MB)))
+}
+```
+
+Now that we have a function to calculate a log-unnormalized posterior density, we can run the Markov chain.  To that, we need the model matrix.First we convert the UCAdmissions data to a data.frame.
+```{r}
+dat <- as.data.frame(UCBAdmissions)
+dat.split <- split(dat, dat$Admit)
+dat.split <- lapply(dat.split,
+                    function(d) {
+                      val <- as.character(d$Admit[1])
+                      d["Admit"] <- NULL
+                      names(d)[names(d) == "Freq"] <- val
+                      d
+                    })
+dat <- merge(dat.split[[1]], dat.split[[2]])
+```
+
+Next we build the model matrix.  Our model specification allows for an interaction between gender and department, even though our prior assumes that they are independent.
+```{r}
+formula <- cbind(Admitted, Rejected) ~ (Gender + Dept)^2
+mf <- model.frame(formula, dat)
+M <- model.matrix(formula, mf)
+```
+
+As stated above, we will take $\nu = 5$ and $\xi=0.30$.  That is, we will add 5 students to each gender-department combination, where each combination has a 30% acceptance rate.
+```{r}
+xi <- 0.30
+nu <- 5
+```
+
+```{r}
+lud.berkeley <- function(B){
+  a<-lud.binom(B, M, dat$Admitted + xi * nu, dat$Admitted + dat$Rejected + nu)
+  return(exp(a/100))
+}
+```
+
+This function is suitable for passing to metrop or morph.metrop.  We know that using morph.metrop with ``morph=morph(p=3)`` will run a geometrically ergodic Markov chain.
+```{r}
+berkeley.out<-mtrp(lud.berkeley,1000,rep(0,ncol(M)),stepsize = 0.1)
+berkeley.out$alpha
+berkeley.out<-mtrp(lud.berkeley,1000,berkeley.out$chain[1000,],stepsize = 0.05)
+berkeley.out$alpha
+berkeley.out<-mtrp(lud.berkeley,1000,berkeley.out$chain[1000,],stepsize = 0.01)
+berkeley.out$alpha
+berkeley.out<-mtrp(lud.berkeley,5000,berkeley.out$chain[1000,],stepsize = 0.005,burn=1e4)
+berkeley.out$alpha
+
+```
+
+Estimate the posterior mean acceptance probabilities for each gender-department combination.
+```{r}
+beta <- setNames(colMeans(berkeley.out$chain), colnames(M))
+MB <- M %*% beta
+dat$p <- dat$Admitted / (dat$Admitted + dat$Rejected)
+dat$p.post <- exp(MB) / (1 + exp(MB))
+dat
+```
+
+The small difference between the data and posterior probabilities is expected, our prior was given very little weight.  Using morph.metrop with the setting morph=morph(p=3) in this setting is an efficient way of sampling from the posterior distribution.
+
+We can also compare the posterior distribution of admittance probability for each gender-department combination. Figure gives the same quantiles, plus the mean posterior-probability for each gender-department combination.  From these we can see that for each department, there is considerable overlap of the distributions of probabilities for males and females.
+
+```{r}
+posterior.probabilities <-
+  t(apply(berkeley.out$chain, 1,
+          function(r) {
+            eMB <- exp(M %*% r)
+            eMB / (1 + eMB)
+          }))
+quants <- apply(posterior.probabilities, 2, quantile, prob=c(0.05, 0.95))
+quants.str <- matrix(apply(quants, 2,
+                           function(r) sprintf("[%0.2f, %0.2f]", r[1], r[2])),
+                     nrow=2, byrow=TRUE)
+```
+
+```{r}
+x <- (0:5) * 2 + 1
+plot(x[c(1, 6)] + 0.5 * c(-1, 1), 0:1,
+     xlab="Department", ylab="Probability", xaxt="n", type="n")
+axis(1, x, LETTERS[1:6])
+for(i in 1:6) {
+  lines((x[i]-0.25)*c(1, 1), quants[1:2, i], lwd=2, col="gray")
+  lines((x[i] + 0.25) * c(1, 1), quants[1:2, i + 6], lwd=2, col="gray")
+  points(x[i] + 0.25 * c(-1, 1), dat$p.post[i + c(0, 6)], pch=c("F", "M"))
+}
+```
+
+## Cauchy Location-Scale Model
+
+We are going to do a Cauchy location-scale family objective Bayesianly.
+
+### Data
+
+First we generate some data,mu0 and sigma0 are the true unknown parameter values.
+```{r}
+n <- 15
+mu0 <- 50
+sigma0 <- 10
+x <- rcauchy(n, mu0, sigma0)
+round(sort(x), 1)
+```
+
+### Prior
+
+The standard objective prior distribution for this situation is the improper prior which is right Haar measure for the location-scale group, and is the
+standard prior that comes from the group invariance argument.
+$$
+   g(\mu, \sigma) = \frac{1}{\sigma}
+$$
+
+### Log Unnormalized Posterior
+
+We need a function whose argument is a two-vector
+```{r}
+lup <- function(theta) {
+    if (any(is.na(theta)))
+        stop("NA or NaN in input to log unnormalized density function")
+    mu <- theta[1]
+    sigma <- theta[2]
+    if (sigma <= 0) return(-Inf)
+    if (any(! is.finite(theta))) return(-Inf)
+    result <- sum(dcauchy(x, mu, sigma, log = TRUE)) - log(sigma)
+    if (! is.finite(result)) {
+        warning(paste("Oops!  mu = ", mu, "and sigma =", sigma))
+    }
+    return(exp(result))
+}
+```
+
+### Laplace Approximation
+
+To have some idea what we are doing, we first maximize the log unnormalized posterior.  To do it helps to have good starting points for the optimization. Robust estimators of location and scale are
+```{r}
+mu.twiddle <- median(x)
+sigma.twiddle <- IQR(x)
+c(mu.twiddle, sigma.twiddle)
+```
+
+The posterior mode is:
+```{r}
+oout <- optim(c(mu.twiddle, sigma.twiddle), lup,
+    control = list(fnscale = -1), hessian = TRUE)
+stopifnot(oout$convergence == 0)
+mu.hat <- oout$par[1]
+sigma.hat <- oout$par[2]
+c(mu.hat, sigma.hat)
+```
+
+The hessian evaluated at the posterior mode (calculated by optim using finite differences) is
+```{r}
+oout$hessian
+```
+
+The hessian is nearly diagonal and one can check that theoretically is exactly diagonal.  Thus approximate (asymptotic) posterior standard deviations are
+```{r}
+sqrt(- 1 / diag(oout$hessian))
+```
+
+### Theory
+
+To use the theory in johnson-geyer we must verify that the target distribution (the unnormalized posterior) is everywhere positive, and it isn't (it is zero for $\sigma \le 0$).  We tried making $\log(\sigma)$ the parameter but this didn't work either because $\log(\sigma)$ goes to infinity so slowly that this stretches out the tails so much that the transformations introduced by johnson-geyer can't pull them back in again.  We do know that if we fix $\sigma$ this is a sub-rexply light target distribution.  Letting $\sigma$ vary can only make this worse.  Thus, if we don't do anything and just use the metrop function, then performance will be very bad.  So we are going to use the transformations and the morph.metrop function, even though the theory that motivates them does not hold.
+
+### Morph
+
+We want to center the transformation at the posterior mode, and use a radius $r$ that doesn't transform until several approximate standard deviations
+```{r}
+mout<-mtrp(lup,1e4,c(mu.hat,sigma.hat),stepsize =4)
+mout$alpha
+```
+
+An attempt to increase the scale led to error when the transformation functions overflowed.  Can't take steps too big with this stuff.The following code makes an autocorrelation plot.
+```{}
+a<-mout1$chain
+acf(a)
+```
+
+The following code makes the density plot.
+```{r}
+mu <- mout$chain[ , 1]
+i <- seq(1, 1e4, by = 15)
+out.sub <- density(mu[i])
+out <- density(mu, bw = out.sub$bw)
+plot(out)
+```
+
+And a similar plot for $\sigma$
+```{r}
+sigma <- mout$chain[ , 2]
+out.sub <- density(sigma[i])
+out <- density(sigma, bw = out.sub$bw)
+plot(out)
+```
