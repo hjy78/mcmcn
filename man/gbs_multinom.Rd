@@ -29,7 +29,6 @@ MCMC method for generating vectors with multinom distribution using Gibbs sample
 # Generating Multinom Distribution Samples-----------------------------------
 
 # setting some parameters
-set.seed(123)
 prob <- c(0.2, 0.1, 0.1, 0.1, 0.1, 0.1,
           0.05, 0.05, 0.05, 0.05, 0.02, 0.02, 0.02, 0.02, 0.02)
 p <- sample(prob)

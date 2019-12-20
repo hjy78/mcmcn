@@ -7,5 +7,5 @@ rexpu <- function(n, a = 0, b = 0, rate = 1) {
   x.exp <- b + rexp(n, rate)
   p <- rbinom(n, 1, 1 / (rate * (b - a) + 1))
   x <- ifelse(p, x.exp, x.unif)
-  return(x)
+  x
 }

@@ -23,8 +23,8 @@ it will be broadcast to a vector with the same length as init.}
 \item{burn}{Times of iterations one wants to omit before recording.}
 }
 \value{
-A "mcmcn" object `list("chain" = chain, "alpha" = k/iters, "acpt" = acpt)` with
-chain storing samples by row, alpha being the rejection rate,
+A "mcmcn" object `list("chain" = chain, "reject" = k/iters, "acpt" = acpt)` with
+chain storing samples by row, reject being the rejection rate,
 acpt being whether to be accepted each iter.
 }
 \description{
@@ -46,23 +46,19 @@ legend("topright", c("Exp(1)", "X"), lty = c(1, 1), col = c("red", "black"))
 # Exp(Λ) distribution. That is, X|Λ = λ ∼ f_X (x|λ) = λe^{−λy}.)
 
 # pdf f(x) = r * beta^r / (x + beta)^{r+1}
+pareto2d <- function(r, beta) {
+  function(x) ifelse(x[1] >= 0 && x[2] >=0, x[2]^r * exp(-x[2] * (x[1]+beta)), 0)
+}
 r <- 1
 beta <- 2
-f <- function(x){
-  ifelse(x >= 0, (x + beta)^(-(r+1)), 0)
-}
+f <- pareto2d(r, beta)
 
 # generating random variates using function `mtrp_expu`
 x.pareto <- mtrp_expu(f, 10000, 1, rate = 0.5, burn = 0)
 
 # exploring the results
-cat("The sample rejection rate is", x.pareto$alpha)
-par(mfrow = c(2, 1))
-plot(1:500, x.pareto$chain[1:500], type = "l",
-     main = "first 500 iters", ylab = "X")
-plot(9501:10000, x.pareto$chain[9501:10000], type = "l",
-     main = "last 500 iters", ylab = "X")
-par(mfrow = c(1, 1))
-hist(x.pareto$chain, freq = FALSE, main = "Histogram of Samples", xlab = "X")
-curve(r * beta ^ r * (x + beta)^(-(r+1)), from = 0, col = "red", add = TRUE)
+summary(x.pareto0)
+plot(x.pareto0)
+hist(x.pareto0$chain[, 1], freq = FALSE, main = "Histogram of Samples", xlab = "X")
+curve(r * beta^r * (x + beta)^(-(r+1)), from = 0, col = "red", add = TRUE)
 }

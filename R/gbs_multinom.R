@@ -18,7 +18,6 @@
 #' # Generating Multinom Distribution Samples-----------------------------------
 #'
 #' # setting some parameters
-#' set.seed(123)
 #' prob <- c(0.2, 0.1, 0.1, 0.1, 0.1, 0.1,
 #'           0.05, 0.05, 0.05, 0.05, 0.02, 0.02, 0.02, 0.02, 0.02)
 #' p <- sample(prob)
@@ -67,6 +66,8 @@ gbs_multinom <- function(n,
     chain[i, x[2]] <- s - chain[i, x[1]]
   }
 
-  ifelse(burn, return(structure(list("chain" = chain[-(1:burn), ]), class = "mcmcn")),
-         return(structure(list("chain" = chain), class = "mcmcn")))
+  if (burn)
+    structure(list(chain = chain[-(1:burn), ]), class = "mcmcn")
+  else
+    structure(list(chain = chain), class = "mcmcn")
 }

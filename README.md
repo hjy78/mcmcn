@@ -8,7 +8,7 @@ Type: Package
 
 Title: Markov Chain Monte Carlo Sampler
 
-Version: 0.5.0
+Version: 1.0.0
 
 Author@R: c(person("Jiayi", "Huang", , email = "hjy0708@mail.ustc.edu.cn", role = c("aut", "cre")),
             person("Yuecheng", "Zhang", , email = "an1999@mail.ustc.edu.cn", role = c("aut"))

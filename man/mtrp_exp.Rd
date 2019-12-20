@@ -23,8 +23,8 @@ it will be broadcast to a vector with the same length as init.}
 \item{burn}{Times of iterations one wants to omit before recording.}
 }
 \value{
-A "mcmcn" object `list("chain" = chain, "alpha" = k/iters, "acpt" = acpt)` with
-chain storing samples by row, alpha being the rejection rate,
+A "mcmcn" object `list("chain" = chain, "reject" = k/iters, "acpt" = acpt)` with
+chain storing samples by row, reject being the rejection rate,
 acpt being whether to be accepted each iter.
 }
 \description{
@@ -36,21 +36,14 @@ proposal distribution using an independence sampler algorithm.
 (i.e., with support [1,+Infinity))
 
 # pdf f(x) = exp(1 - x)
-f <- function(x){
-  ifelse(x >= 1, return(exp(-x)), 0)
-}
+f <- function(x) ifelse(x >= 1, exp(-x), 0)
 
 # generating random variates using function `mtrp_exp`
 x.exp1 <- mtrp_exp(f, 10000, 1, a = 1, burn = 0)
 
 # exploring the results
-cat("The sample rejection rate is", x.exp1$alpha, "\\n")
-par(mfrow = c(2, 1))
-plot(1:500, x.exp1$chain[1:500], type = "l",
-     main = "first 500 iters", ylab = "X")
-plot(9501:10000, x.exp1$chain[9501:10000], type = "l",
-     main = "last 500 iters", ylab = "X")
-par(mfrow = c(1, 1))
+summary(x.exp1)
+plot(x.exp1, "c")
 hist(x.exp1$chain, freq = FALSE, breaks = 50,
      main = "Histogram of Samples",
      xlab = "X", xlim = c(0,4), ylim = c(0,  exp(1)))

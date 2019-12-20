@@ -85,7 +85,7 @@ out <- metrop(lupost,beta.init,1e3)
 
 out1<-mtrp(lupost,1e3,beta.init)
 names(out1)
-out1$alpha
+out1$reject
 ```
 
 The arguments to the $mtrp$ function used here are
@@ -96,13 +96,13 @@ The arguments to the $mtrp$ function used here are
 -  additional arguments (here $x$ and $y$) supplied to provided functions (here $lupost$).
 -  there is also ``burn`` argument, and burn-in is easily accomplished.
 
-The output is in the component $out\$chain$ returned by the $mtrp$ function.  We'll look at it presently, but first we need to adjust the proposal to get a higher acceptance rate ($out\$alpha$).  It is generally accepted that an acceptance rate of about 20% is right, although this recommendation is based on the asymptotic analysis of a toy problem(simulating a multivariate normal distribution) for which one would never use MCMC and is very unrepresentative of difficult MCMCN applications.
+The output is in the component $out\$chain$ returned by the $mtrp$ function.  We'll look at it presently, but first we need to adjust the proposal to get a higher acceptance rate ($out\$reject$).  It is generally accepted that an acceptance rate of about 20% is right, although this recommendation is based on the asymptotic analysis of a toy problem(simulating a multivariate normal distribution) for which one would never use MCMC and is very unrepresentative of difficult MCMCN applications.
 
 We came to a similar conclusion,that a 20% acceptance rate is about right, in a very different situation.But they also warned that a 20% acceptance rate could be very wrong and produced an example where a 20% acceptance rate was impossible and attempting to reduce the acceptance rate below 70% would keep the sampler from ever visiting part of the state space.  So the 20% magic number must be considered like other rules of thumb we teach in intro courses(like $n > 30$ means means normal approximation is valid).
 
 ```{r}
 out1<-mtrp(lupost,1000,out1$chain[1000,],stepsize = 0.3)
-out1$alpha
+out1$reject
 ```
 
 Here the first argument to each instance of the $metrop$ function is the output of a previous invocation.  The Markov chain continues where the previous run stopped, doing just what it would have done if it had kept going, the initial state and random seed being the final state and final random seed of the previous invocation.  Everything stays the same except for the arguments supplied (here $scale$).
@@ -438,9 +438,9 @@ out<-metrop(lupost1,beta.init,1e3,scale=0.3,x=x,y=y)
 
 ```{r}
 out1<-mtrp(lupost,1e3,beta.init,stepsize = 0.1)
-out1$alpha
+out1$reject
 out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
-out1$alpha
+out1$reject
 ```
 
 ### More Than One Function Argument
@@ -473,15 +473,15 @@ outfun <- function(z) cbind(z, z^2)
 
 ```{r}
 out1 <- mtrp(lupost,1e3,beta.init,stepsize = 0.3)
-out1$alpha
+out1$reject
 out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
-out1$alpha
+out1$reject
 out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
-out1$alpha
+out1$reject
 out1<-mtrp(lupost,1e3,out1$chain[1000,],stepsize = 0.3)
-out1$alpha
+out1$reject
 out1 <- mtrp(lupost,100,beta.init,stepsize = 0.3)
-out1$alpha
+out1$reject
 out.chain<-outfun(out1$chain)
 ```
 
@@ -606,13 +606,13 @@ out <- mtrp(lud1, 100,0,stepsize = 1)
 ```
 
 ```{r}
-out$alpha
+out$reject
 ```
 
 An acceptance rate of 60% to fix emacs highlighting is probably too high.  By increasing the scale of the proposal distribution we can bring it down towards 20%.
 ```{r}
 out <- mtrp(lud1, 100,0,stepsize = 4)
-out$alpha
+out$reject
 ```
 
 We now use this Markov chain to estimate the expectation of the target distribution.Makes the autocorrelation plot .
@@ -638,11 +638,11 @@ To show the utility of the transformation, we will study the behavior of the Mar
 For the former, we need to adjust the scale.
 ```{r}
 out.unmorph <- mtrp(lud1, 1000,out$chain[100])
-out.unmorph$alpha
+out.unmorph$reject
 out.unmorph <-mtrp(lud1, 1000,out$chain[100],stepsize = 4)
-out.unmorph$alpha
+out.unmorph$reject
 out.unmorph <- mtrp(lud1, 1000,out$chain[100],stepsize = 6)
-out.unmorph$alpha
+out.unmorph$reject
 ```
 
 ```{r}
@@ -653,7 +653,7 @@ if (inherits(lout, "try-error")) {
 } else {
     .Random.seed <- out.unmorph$final.seed
 }
-out.unmorph$alpha
+out.unmorph$reject
 ```
 
 Let's look at the distribution of batch means.
@@ -739,13 +739,13 @@ lud.berkeley <- function(B){
 This function is suitable for passing to metrop or morph.metrop.  We know that using morph.metrop with ``morph=morph(p=3)`` will run a geometrically ergodic Markov chain.
 ```{r}
 berkeley.out<-mtrp(lud.berkeley,1000,rep(0,ncol(M)),stepsize = 0.1)
-berkeley.out$alpha
+berkeley.out$reject
 berkeley.out<-mtrp(lud.berkeley,1000,berkeley.out$chain[1000,],stepsize = 0.05)
-berkeley.out$alpha
+berkeley.out$reject
 berkeley.out<-mtrp(lud.berkeley,1000,berkeley.out$chain[1000,],stepsize = 0.01)
-berkeley.out$alpha
+berkeley.out$reject
 berkeley.out<-mtrp(lud.berkeley,5000,berkeley.out$chain[1000,],stepsize = 0.005,burn=1e4)
-berkeley.out$alpha
+berkeley.out$reject
 
 ```
 
@@ -867,7 +867,7 @@ To use the theory in johnson-geyer we must verify that the target distribution (
 We want to center the transformation at the posterior mode, and use a radius $r$ that doesn't transform until several approximate standard deviations
 ```{r}
 mout<-mtrp(lup,1e4,c(mu.hat,sigma.hat),stepsize =4)
-mout$alpha
+mout$reject
 ```
 
 An attempt to increase the scale led to error when the transformation functions overflowed.  Can't take steps too big with this stuff.The following code makes an autocorrelation plot.

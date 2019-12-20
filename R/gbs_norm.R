@@ -16,31 +16,16 @@
 #' # Generating Multivariate Normal Distribution Samples------------------------
 #'
 #' # provide some parameters
-#' mu <- c(1,3)
-#' A <- matrix(c(1, 0.1, 0.1, 1), nrow = 2)
+#' # mu <- c(1,3)
+#' # A <- matrix(c(1, 0.1, 0.1, 1), nrow = 2)
 #'
 #' # generating random variates using function `gibbs_norm`
-#' x.norm <- gbs_norm(mu, A, 10000, mu, burn = 0)
+#' x.norm <- gbs_norm(10000, c(1,3), matrix(c(1, 0.1, 0.1, 1), nrow = 2), c(1,3), burn = 0)
 #'
 #' # exploring the results
-#' cat("The sample mean is", colMeans(x.norm), "\n")
-#' cat("The sample covariance matrix is\n")
-#' cov(x.norm)
-#' par(mfrow = c(1, 2))
-#' plot(x.norm[1:100, 1], x.norm[1:100, 2], type = "b", pch = 20,
-#'      main = "first 100 iters", xlab = "1st variable", ylab = "2nd variable")
-#' plot(x.norm[9901:10000, 1], x.norm[9901:10000, 2], type = "b",
-#'      pch = 20, main = "last 100 iters", xlab = "1st variable", ylab = "2nd variable")
-#' par(mfrow = c(2, 1))
-#' plot(1:500, x.norm[1:500, 1], type = "l", ylab = "1st variable",
-#'      main = "first 500 iters")
-#' plot(9501:10000, x.norm[9501:10000, 1], type = "l", ylab = "1st variable",
-#'      main = "last 500 iters")
-#' par(mfrow = c(1, 2))
-#' plot(x.norm, pch = 20, cex = 0.5, main = "Sample Distribution",
-#'      xlab = "1st variable", ylab = "2nd variable")
-#' qqnorm(x.norm[, 1], main = "QQ plot, 1st variable")
-#' par(mfrow = c(1, 1))
+#' summary(x.norm)
+#' plot(x.norm)
+#' qqnorm(x.norm$chain[, 1], main = "QQ plot, 1st variable")
 
 gbs_norm <- function(n,
                      mu,
@@ -75,6 +60,8 @@ gbs_norm <- function(n,
                          (A[j, j] - A[j, -j] %*% A.inv[, , j] %*% A[-j, j]) ^ (1 / 2))
   }
 
-  ifelse(burn, return(structure(list("chain" = chain[-(1:burn), ]), class = "mcmcn")),
-         return(structure(list("chain" = chain), class = "mcmcn")))
+  if (burn)
+    structure(list(chain = chain[-(1:burn), ]), class = "mcmcn")
+  else
+    structure(list(chain = chain), class = "mcmcn")
 }
